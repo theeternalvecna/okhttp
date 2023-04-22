@@ -17,7 +17,6 @@ package okhttp3
 
 import java.io.IOException
 import java.net.InetAddress
-import java.net.InetSocketAddress
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.SocketPolicy.ResetStreamAtStart
@@ -26,11 +25,11 @@ import okhttp3.internal.http2.ErrorCode
 import okhttp3.testing.PlatformRule
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.RegisterExtension
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 
 class RouteFailureTest {
-  private lateinit var socketFactory: SpecificHostSocketFactory
   private lateinit var client: OkHttpClient
 
   @RegisterExtension
@@ -44,12 +43,16 @@ class RouteFailureTest {
 
   private var listener = RecordingEventListener()
 
+  private var socketFactory: SpecificHostSocketFactory = SpecificHostSocketFactory(defaultAddress = null)
+
   private val handshakeCertificates = platform.localhostHandshakeCertificates()
 
   val dns = FakeDns()
 
   val ipv4 = InetAddress.getByName("203.0.113.1")
   val ipv6 = InetAddress.getByName("2001:db8:ffff:ffff:ffff:ffff:ffff:1")
+  val unresolvableIpv4 = InetAddress.getByName("198.51.100.1")
+  val unresolvableIpv6 = InetAddress.getByName("2001:db8:ffff:ffff:ffff:ffff:ffff:ffff")
 
   val refusedStream = MockResponse(
     socketPolicy = ResetStreamAtStart(ErrorCode.REFUSED_STREAM.httpCode),
@@ -64,7 +67,6 @@ class RouteFailureTest {
     this.server1 = server
     this.server2 = server2
 
-    socketFactory = SpecificHostSocketFactory(InetSocketAddress(server.hostName, server.port))
 
     client = clientTestRule.newClientBuilder()
       .dns(dns)
@@ -73,8 +75,11 @@ class RouteFailureTest {
       .build()
   }
 
-  @Test
-  fun http2OneBadHostOneGoodNoRetryOnConnectionFailure() {
+  @ParameterizedTest
+  @ValueSource(booleans = [true, false])
+  fun http2OneBadHostOneGoodNoRetryOnConnectionFailure(
+    fastFallback: Boolean
+  ) {
     enableProtocol(Protocol.HTTP_2)
 
     val request = Request(server1.url("/"))
@@ -87,7 +92,7 @@ class RouteFailureTest {
     socketFactory[ipv4] = server2.inetSocketAddress
 
     client = client.newBuilder()
-      .fastFallback(false)
+      .fastFallback(fastFallback)
       .apply {
         retryOnConnectionFailure = false
       }
@@ -108,8 +113,11 @@ class RouteFailureTest {
     )
   }
 
-  @Test
-  fun http2OneBadHostOneGoodRetryOnConnectionFailure() {
+  @ParameterizedTest
+  @ValueSource(booleans = [true, false])
+  fun http2OneBadHostOneGoodRetryOnConnectionFailure(
+    fastFallback: Boolean
+  ) {
     enableProtocol(Protocol.HTTP_2)
 
     val request = Request(server1.url("/"))
@@ -123,85 +131,7 @@ class RouteFailureTest {
     socketFactory[ipv4] = server2.inetSocketAddress
 
     client = client.newBuilder()
-      .fastFallback(false)
-      .apply {
-        retryOnConnectionFailure = true
-      }
-      .build()
-
-    executeSynchronously(request)
-      .assertBody("body")
-
-    assertThat(client.routeDatabase.failedRoutes).isEmpty()
-    // TODO check if we expect a second request to server1, before attempting server2
-    assertThat(server1.requestCount).isEqualTo(2)
-    assertThat(server2.requestCount).isEqualTo(1)
-
-    assertThat(clientTestRule.recordedConnectionEventTypes()).containsExactly(
-      "ConnectStart",
-      "ConnectEnd",
-      "ConnectionAcquired",
-      "NoNewExchanges",
-      "ConnectionReleased",
-      "ConnectionClosed",
-      "ConnectStart",
-      "ConnectEnd",
-      "ConnectionAcquired",
-      "ConnectionReleased",
-    )
-  }
-
-  @Test
-  fun http2OneBadHostOneGoodNoRetryOnConnectionFailureFastFallback() {
-    enableProtocol(Protocol.HTTP_2)
-
-    val request = Request(server1.url("/"))
-
-    server1.enqueue(refusedStream)
-    server2.enqueue(bodyResponse)
-
-    dns[server1.hostName] = listOf(ipv6, ipv4)
-    socketFactory[ipv6] = server1.inetSocketAddress
-    socketFactory[ipv4] = server2.inetSocketAddress
-
-    client = client.newBuilder()
-      .fastFallback(true)
-      .apply {
-        retryOnConnectionFailure = false
-      }
-      .build()
-
-    executeSynchronously(request)
-      .assertFailureMatches("stream was reset: REFUSED_STREAM")
-
-    assertThat(client.routeDatabase.failedRoutes).isEmpty()
-    assertThat(server1.requestCount).isEqualTo(1)
-    assertThat(server2.requestCount).isEqualTo(0)
-
-    assertThat(clientTestRule.recordedConnectionEventTypes()).containsExactly(
-      "ConnectStart",
-      "ConnectEnd",
-      "ConnectionAcquired",
-      "ConnectionReleased"
-    )
-  }
-
-  @Test
-  fun http2OneBadHostOneGoodRetryOnConnectionFailureFastFallback() {
-    enableProtocol(Protocol.HTTP_2)
-
-    val request = Request(server1.url("/"))
-
-    server1.enqueue(refusedStream)
-    server1.enqueue(refusedStream)
-    server2.enqueue(bodyResponse)
-
-    dns[server1.hostName] = listOf(ipv6, ipv4)
-    socketFactory[ipv6] = server1.inetSocketAddress
-    socketFactory[ipv4] = server2.inetSocketAddress
-
-    client = client.newBuilder()
-      .fastFallback(true)
+      .fastFallback(fastFallback)
       .apply {
         retryOnConnectionFailure = true
       }
@@ -229,8 +159,11 @@ class RouteFailureTest {
     )
   }
 
-  @Test
-  fun http2OneBadHostRetryOnConnectionFailure() {
+  @ParameterizedTest
+  @ValueSource(booleans = [true, false])
+  fun http2OneBadHostRetryOnConnectionFailure(
+    fastFallback: Boolean
+  ) {
     enableProtocol(Protocol.HTTP_2)
 
     val request = Request(server1.url("/"))
@@ -242,7 +175,7 @@ class RouteFailureTest {
     socketFactory[ipv6] = server1.inetSocketAddress
 
     client = client.newBuilder()
-      .fastFallback(false)
+      .fastFallback(fastFallback)
       .apply {
         retryOnConnectionFailure = true
       }
@@ -262,32 +195,40 @@ class RouteFailureTest {
     )
   }
 
-  @Test
-  fun http2OneBadHostRetryOnConnectionFailureFastFallback() {
+  @ParameterizedTest
+  @ValueSource(booleans = [true, false])
+  fun http2OneUnresolvableHost(
+    fastFallback: Boolean
+  ) {
     enableProtocol(Protocol.HTTP_2)
 
     val request = Request(server1.url("/"))
 
-    server1.enqueue(refusedStream)
-    server1.enqueue(refusedStream)
+    server1.enqueue(bodyResponse)
 
-    dns[server1.hostName] = listOf(ipv6)
+    dns[server1.hostName] = listOf(unresolvableIpv6, ipv6)
+    // Will remain unresolvable
+//    socketFactory[unresolvableIpv6] = unresolvableIpv6
     socketFactory[ipv6] = server1.inetSocketAddress
 
     client = client.newBuilder()
-      .fastFallback(true)
+      .fastFallback(fastFallback)
       .apply {
         retryOnConnectionFailure = true
       }
       .build()
 
     executeSynchronously(request)
-      .assertFailureMatches("stream was reset: REFUSED_STREAM")
+      .assertCode(200)
 
-    assertThat(client.routeDatabase.failedRoutes).isEmpty()
+    val failedRoutes = client.routeDatabase.failedRoutes
+    assertThat(failedRoutes.single().socketAddress.address).isEqualTo(unresolvableIpv6)
+
     assertThat(server1.requestCount).isEqualTo(1)
 
     assertThat(clientTestRule.recordedConnectionEventTypes()).containsExactly(
+      "ConnectStart",
+      "ConnectFailed",
       "ConnectStart",
       "ConnectEnd",
       "ConnectionAcquired",

@@ -137,6 +137,7 @@ class ConnectPlan(
       success = true
       return ConnectResult(plan = this)
     } catch (e: IOException) {
+      client.routeDatabase.failed(route)
       eventListener.connectFailed(call, route.socketAddress, route.proxy, null, e)
       connectionListener.connectFailed(route, call, e)
       return ConnectResult(plan = this, throwable = e)
