@@ -1,3 +1,5 @@
+@file:Suppress("UnstableApiUsage")
+
 import com.vanniktech.maven.publish.JavadocJar
 
 plugins {
@@ -39,6 +41,10 @@ android {
   }
 }
 
+tasks.withType<Test> {
+  useJUnit()
+}
+
 dependencies {
   api(libs.squareup.okio)
   api(projects.okhttp)
@@ -48,6 +54,7 @@ dependencies {
   debugImplementation(libs.findbugs.jsr305)
   compileOnly(libs.animalsniffer.annotations)
   compileOnly(libs.robolectric.android)
+  implementation("androidx.core:core-ktx:1.10.1")
 
   testImplementation(libs.junit)
   testImplementation(libs.junit.ktx)
