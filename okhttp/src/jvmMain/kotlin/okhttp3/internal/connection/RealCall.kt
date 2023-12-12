@@ -31,7 +31,6 @@ import okhttp3.Address
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.CertificatePinner
-import okhttp3.EventListener
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -67,7 +66,7 @@ class RealCall(
 ) : Call, Cloneable {
   private val connectionPool: RealConnectionPool = client.connectionPool.delegate
 
-  internal val eventListener: EventListener = client.eventListenerFactory.create(this)
+  internal val eventListener: EventListenerList = EventListenerList(client.eventListenerFactory.create(this))
 
   private val timeout = object : AsyncTimeout() {
     override fun timedOut() {
