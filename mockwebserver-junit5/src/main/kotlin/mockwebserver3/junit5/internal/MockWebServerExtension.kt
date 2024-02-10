@@ -39,7 +39,7 @@ import org.junit.jupiter.api.extension.ParameterResolver
  * There are 3 ids for instances
  * - The test instance default (passed into constructor)
  * - The test lifecycle default (passed into test method, plus @BeforeEach, @AfterEach)
- * - named instances with @MockWebServerInstance.
+ * - named instances with @Named.
  */
 @ExperimentalOkHttpApi
 class MockWebServerExtension :
@@ -111,10 +111,10 @@ class MockWebServerExtension :
     parameterContext: ParameterContext,
     extensionContext: ExtensionContext,
   ): Any {
-    val nameAnnotation = parameterContext.findAnnotation(MockWebServerInstance::class.java)
+    val nameAnnotation = parameterContext.findAnnotation(javax.inject.Named::class.java)
     val name =
       if (nameAnnotation.isPresent) {
-        nameAnnotation.get().name
+        nameAnnotation.get().value
       } else {
         defaultName
       }
