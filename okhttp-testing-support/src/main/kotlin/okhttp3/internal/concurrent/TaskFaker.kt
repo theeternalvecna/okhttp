@@ -239,7 +239,7 @@ class TaskFaker : Closeable {
   }
 
   /** Process the queue until [condition] returns true. */
-  private tailrec fun yieldUntil(
+  tailrec fun yieldUntil(
     strategy: ResumePriority = ResumePriority.AfterEnqueuedTasks,
     condition: () -> Boolean = { true },
   ) {
@@ -280,7 +280,7 @@ class TaskFaker : Closeable {
     }
   }
 
-  private enum class ResumePriority {
+  enum class ResumePriority {
     /** Resumes as soon as the condition is satisfied. */
     BeforeOtherTasks,
 
@@ -331,6 +331,9 @@ class TaskFaker : Closeable {
         try {
           runnable.run()
           require(currentTask == this) { "unexpected current task: $currentTask" }
+        } catch (e: Throwable) {
+          e.printStackTrace()
+          throw e
         } finally {
           taskRunner.lock.withLock {
             activeThreads--
@@ -352,7 +355,7 @@ class TaskFaker : Closeable {
 
     private var editCount = 0
 
-    override fun poll(): T = delegate.poll()
+    override fun poll(): T = poll(Long.MAX_VALUE, TimeUnit.NANOSECONDS)!!
 
     override fun poll(
       timeout: Long,
@@ -361,7 +364,7 @@ class TaskFaker : Closeable {
       taskRunner.lock.withLock {
         val waitUntil = nanoTime + unit.toNanos(timeout)
         while (true) {
-          val result = poll()
+          val result = delegate.poll()
           if (result != null) return result
           if (nanoTime >= waitUntil) return null
           val editCountBefore = editCount

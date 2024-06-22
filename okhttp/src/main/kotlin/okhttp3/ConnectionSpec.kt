@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Square, Inc.
+ * Copyright (C) 2024 Square, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,8 @@ import okhttp3.internal.effectiveCipherSuites
 import okhttp3.internal.hasIntersection
 import okhttp3.internal.indexOf
 import okhttp3.internal.intersect
+import okhttp3.internal.socket.OkioSslSocket
+import okhttp3.internal.socket.RealOkioSslSocket
 
 /**
  * Specifies configuration for the socket connection that HTTP traffic travels through. For `https:`
@@ -96,6 +98,13 @@ class ConnectionSpec internal constructor(
 
   /** Applies this spec to [sslSocket]. */
   internal fun apply(
+    sslSocket: OkioSslSocket,
+    isFallback: Boolean,
+  ) {
+    return apply((sslSocket as RealOkioSslSocket).delegate, isFallback)
+  }
+
+  internal fun apply(
     sslSocket: SSLSocket,
     isFallback: Boolean,
   ) {
@@ -146,6 +155,22 @@ class ConnectionSpec internal constructor(
       .cipherSuites(*cipherSuitesIntersection)
       .tlsVersions(*tlsVersionsIntersection)
       .build()
+  }
+
+  /**
+   * Returns `true` if the socket, as currently configured, supports this connection spec. In
+   * order for a socket to be compatible the enabled cipher suites and protocols must intersect.
+   *
+   * For cipher suites, at least one of the [required cipher suites][cipherSuites] must match the
+   * socket's enabled cipher suites. If there are no required cipher suites the socket must have at
+   * least one cipher suite enabled.
+   *
+   * For protocols, at least one of the [required protocols][tlsVersions] must match the socket's
+   * enabled protocols.
+   */
+  @ExperimentalOkHttpApi
+  fun isCompatible(socket: OkioSslSocket): Boolean {
+    return isCompatible((socket as RealOkioSslSocket).delegate)
   }
 
   /**

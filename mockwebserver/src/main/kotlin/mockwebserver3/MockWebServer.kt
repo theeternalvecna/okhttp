@@ -24,8 +24,6 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ProtocolException
 import java.net.Proxy
-import java.net.ServerSocket
-import java.net.Socket
 import java.net.SocketException
 import java.security.SecureRandom
 import java.security.cert.CertificateException
@@ -39,7 +37,6 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.logging.Level
 import java.util.logging.Logger
-import javax.net.ServerSocketFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
@@ -80,6 +77,13 @@ import okhttp3.internal.http2.Http2Connection
 import okhttp3.internal.http2.Http2Stream
 import okhttp3.internal.immutableListOf
 import okhttp3.internal.platform.Platform
+import okhttp3.internal.socket.OkioServerSocket
+import okhttp3.internal.socket.OkioServerSocketFactory
+import okhttp3.internal.socket.OkioSocket
+import okhttp3.internal.socket.OkioSslSocketFactory
+import okhttp3.internal.socket.RealOkioServerSocketFactory
+import okhttp3.internal.socket.RealOkioSslSocket
+import okhttp3.internal.socket.RealOkioSslSocketFactory
 import okhttp3.internal.threadFactory
 import okhttp3.internal.toImmutableList
 import okhttp3.internal.ws.RealWebSocket
@@ -91,8 +95,6 @@ import okio.BufferedSource
 import okio.Sink
 import okio.Timeout
 import okio.buffer
-import okio.sink
-import okio.source
 
 /**
  * A scriptable web server. Callers supply canned responses and the server replays them upon request
@@ -107,7 +109,7 @@ class MockWebServer : Closeable {
   private val taskRunner = TaskRunner(taskRunnerBackend)
   private val requestQueue = LinkedBlockingQueue<RecordedRequest>()
   private val openClientSockets =
-    Collections.newSetFromMap(ConcurrentHashMap<Socket, Boolean>())
+    Collections.newSetFromMap(ConcurrentHashMap<OkioSocket, Boolean>())
   private val openConnections =
     Collections.newSetFromMap(ConcurrentHashMap<Http2Connection, Boolean>())
 
@@ -123,10 +125,10 @@ class MockWebServer : Closeable {
   /** The number of bytes of the POST body to keep in memory to the given limit. */
   var bodyLimit: Long = Long.MAX_VALUE
 
-  var serverSocketFactory: ServerSocketFactory? = null
+  var serverSocketFactory: OkioServerSocketFactory? = null
     @Synchronized get() {
       if (field == null && started) {
-        field = ServerSocketFactory.getDefault() // Build the default value lazily.
+        field = RealOkioServerSocketFactory()
       }
       return field
     }
@@ -136,8 +138,8 @@ class MockWebServer : Closeable {
       field = value
     }
 
-  private var serverSocket: ServerSocket? = null
-  private var sslSocketFactory: SSLSocketFactory? = null
+  private var serverSocket: OkioServerSocket? = null
+  private var sslSocketFactory: OkioSslSocketFactory? = null
   private var clientAuth = CLIENT_AUTH_NONE
 
   /**
@@ -232,7 +234,7 @@ class MockWebServer : Closeable {
    * Serve requests with HTTPS rather than otherwise.
    */
   fun useHttps(sslSocketFactory: SSLSocketFactory) {
-    this.sslSocketFactory = sslSocketFactory
+    this.sslSocketFactory = RealOkioSslSocketFactory(sslSocketFactory)
   }
 
   /**
@@ -337,7 +339,7 @@ class MockWebServer : Closeable {
 
     this._inetSocketAddress = inetSocketAddress
 
-    serverSocket = serverSocketFactory!!.createServerSocket()
+    serverSocket = serverSocketFactory!!.newServerSocket()
 
     // Reuse if the user specified a port
     serverSocket!!.reuseAddress = inetSocketAddress.port != 0
@@ -374,7 +376,7 @@ class MockWebServer : Closeable {
   @Throws(Exception::class)
   private fun acceptConnections() {
     while (true) {
-      val socket: Socket
+      val socket: OkioSocket
       try {
         socket = serverSocket!!.accept()
       } catch (e: SocketException) {
@@ -414,7 +416,7 @@ class MockWebServer : Closeable {
     taskRunnerBackend.shutdown()
   }
 
-  private fun serveConnection(raw: Socket) {
+  private fun serveConnection(raw: OkioSocket) {
     taskRunner.newQueue().execute("MockWebServer ${raw.remoteSocketAddress}", cancelable = false) {
       try {
         SocketHandler(raw).handle()
@@ -426,7 +428,7 @@ class MockWebServer : Closeable {
     }
   }
 
-  internal inner class SocketHandler(private val raw: Socket) {
+  internal inner class SocketHandler(private val raw: OkioSocket) {
     private var sequenceNumber = 0
 
     @Throws(Exception::class)
@@ -435,7 +437,7 @@ class MockWebServer : Closeable {
 
       val socketPolicy = dispatcher.peek().socketPolicy
       val protocol: Protocol
-      val socket: Socket
+      val socket: OkioSocket
       when {
         sslSocketFactory != null -> {
           if (socketPolicy === FailHandshake) {
@@ -443,14 +445,8 @@ class MockWebServer : Closeable {
             processHandshakeFailure(raw)
             return
           }
-          socket =
-            sslSocketFactory!!.createSocket(
-              raw,
-              raw.inetAddress.hostAddress,
-              raw.port,
-              true,
-            )
-          val sslSocket = socket as SSLSocket
+          socket = sslSocketFactory!!.createSocket(raw)
+          val sslSocket = (socket as RealOkioSslSocket).delegate
           sslSocket.useClientMode = false
           if (clientAuth == CLIENT_AUTH_REQUIRED) {
             sslSocket.needClientAuth = true
@@ -508,10 +504,7 @@ class MockWebServer : Closeable {
         throw AssertionError()
       }
 
-      val source = socket.source().buffer()
-      val sink = socket.sink().buffer()
-
-      while (processOneRequest(socket, source, sink)) {
+      while (processOneRequest(socket, socket.source, socket.sink)) {
       }
 
       if (sequenceNumber == 0) {
@@ -532,10 +525,8 @@ class MockWebServer : Closeable {
     private fun processTunnelRequests(): Boolean {
       if (!dispatcher.peek().inTunnel) return true // No tunnel requests.
 
-      val source = raw.source().buffer()
-      val sink = raw.sink().buffer()
       while (true) {
-        val socketStillGood = processOneRequest(raw, source, sink)
+        val socketStillGood = processOneRequest(raw, raw.source, raw.sink)
 
         // Clean up after the last exchange on a socket.
         if (!socketStillGood) {
@@ -554,7 +545,7 @@ class MockWebServer : Closeable {
      */
     @Throws(IOException::class, InterruptedException::class)
     private fun processOneRequest(
-      socket: Socket,
+      socket: OkioSocket,
       source: BufferedSource,
       sink: BufferedSink,
     ): Boolean {
@@ -621,17 +612,11 @@ class MockWebServer : Closeable {
   }
 
   @Throws(Exception::class)
-  private fun processHandshakeFailure(raw: Socket) {
+  private fun processHandshakeFailure(raw: OkioSocket) {
     val context = SSLContext.getInstance("TLS")
     context.init(null, arrayOf<TrustManager>(UNTRUSTED_TRUST_MANAGER), SecureRandom())
-    val sslSocketFactory = context.socketFactory
-    val socket =
-      sslSocketFactory.createSocket(
-        raw,
-        raw.inetAddress.hostAddress,
-        raw.port,
-        true,
-      ) as SSLSocket
+    val sslSocketFactory = RealOkioSslSocketFactory(context.socketFactory)
+    val socket = sslSocketFactory.createSocket(raw)
     try {
       socket.startHandshake() // we're testing a handshake failure
       throw AssertionError()
@@ -643,7 +628,7 @@ class MockWebServer : Closeable {
   @Throws(InterruptedException::class)
   private fun dispatchBookkeepingRequest(
     sequenceNumber: Int,
-    socket: Socket,
+    socket: OkioSocket,
   ) {
     val request =
       RecordedRequest(
@@ -663,7 +648,7 @@ class MockWebServer : Closeable {
   /** @param sequenceNumber the index of this request on this connection.*/
   @Throws(IOException::class)
   private fun readRequest(
-    socket: Socket,
+    socket: OkioSocket,
     source: BufferedSource,
     sink: BufferedSink,
     sequenceNumber: Int,
@@ -764,7 +749,7 @@ class MockWebServer : Closeable {
 
   @Throws(IOException::class)
   private fun handleWebSocketUpgrade(
-    socket: Socket,
+    socket: OkioSocket,
     source: BufferedSource,
     sink: BufferedSink,
     request: RecordedRequest,
@@ -829,7 +814,7 @@ class MockWebServer : Closeable {
 
   @Throws(IOException::class)
   private fun writeHttpResponse(
-    socket: Socket,
+    socket: OkioSocket,
     sink: BufferedSink,
     response: MockResponse,
   ) {
@@ -876,7 +861,7 @@ class MockWebServer : Closeable {
     policy: MockResponse,
     disconnectHalfway: Boolean,
     expectedByteCount: Long,
-    socket: Socket,
+    socket: OkioSocket,
   ): Sink {
     var result: Sink = this
 
@@ -956,7 +941,7 @@ class MockWebServer : Closeable {
 
   /** Processes HTTP requests layered over HTTP/2. */
   private inner class Http2SocketHandler constructor(
-    private val socket: Socket,
+    private val socket: OkioSocket,
     private val protocol: Protocol,
   ) : Http2Connection.Listener() {
     private val sequenceNumber = AtomicInteger()

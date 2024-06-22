@@ -19,7 +19,6 @@ import java.net.InetAddress
 import java.net.Proxy
 import java.net.Socket
 import java.util.concurrent.TimeUnit
-import javax.net.ServerSocketFactory
 import javax.net.ssl.SSLSocketFactory
 import okhttp3.Handshake
 import okhttp3.Headers
@@ -29,6 +28,7 @@ import okhttp3.Protocol
 import okhttp3.TlsVersion
 import okhttp3.WebSocketListener
 import okhttp3.internal.http2.Settings
+import okhttp3.internal.socket.RealOkioServerSocketFactory
 import okio.Buffer
 import org.junit.Ignore
 import org.junit.Test
@@ -115,7 +115,7 @@ class KotlinSourceModernTest {
     var hostName: String = mockWebServer.hostName
     hostName = mockWebServer.hostName
     val toProxyAddress: Proxy = mockWebServer.toProxyAddress()
-    mockWebServer.serverSocketFactory = ServerSocketFactory.getDefault()
+    mockWebServer.serverSocketFactory = RealOkioServerSocketFactory()
     val url: HttpUrl = mockWebServer.url("")
     mockWebServer.bodyLimit = 0L
     mockWebServer.protocolNegotiationEnabled = false

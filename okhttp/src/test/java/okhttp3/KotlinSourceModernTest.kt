@@ -38,7 +38,6 @@ import java.util.Date
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import javax.net.ServerSocketFactory
 import javax.net.SocketFactory
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.SSLContext
@@ -60,6 +59,7 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import okhttp3.internal.authenticator.JavaNetAuthenticator
 import okhttp3.internal.http2.Settings
 import okhttp3.internal.proxy.NullProxySelector
+import okhttp3.internal.socket.RealOkioServerSocketFactory
 import okhttp3.internal.tls.OkHostnameVerifier
 import okhttp3.java.net.cookiejar.JavaNetCookieJar
 import okhttp3.logging.HttpLoggingInterceptor
@@ -830,7 +830,7 @@ class KotlinSourceModernTest {
     var hostName: String = mockWebServer.hostName
     hostName = mockWebServer.hostName
     val toProxyAddress: Proxy = mockWebServer.toProxyAddress()
-    mockWebServer.serverSocketFactory = ServerSocketFactory.getDefault()
+    mockWebServer.serverSocketFactory = RealOkioServerSocketFactory()
     val url: HttpUrl = mockWebServer.url("")
     mockWebServer.bodyLimit = 0L
     mockWebServer.protocolNegotiationEnabled = false

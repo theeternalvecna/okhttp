@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Square, Inc.
+ * Copyright (C) 2024 Square, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,13 +27,13 @@ import java.security.KeyPair
 import java.security.Principal
 import java.security.cert.Certificate
 import java.security.cert.X509Certificate
-import javax.net.ServerSocketFactory
 import javax.net.SocketFactory
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.X509KeyManager
 import javax.net.ssl.X509TrustManager
+import okhttp3.internal.socket.RealOkioServerSocketFactory
 import okhttp3.logging.HttpLoggingInterceptor
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -245,7 +245,7 @@ class KotlinDeprecationErrorTest {
   fun mockWebServer() {
     val mockWebServer = MockWebServer()
     var port: Int = mockWebServer.getPort()
-    mockWebServer.setServerSocketFactory(ServerSocketFactory.getDefault())
+    mockWebServer.setServerSocketFactory(RealOkioServerSocketFactory())
     mockWebServer.setBodyLimit(0L)
     mockWebServer.setProtocolNegotiationEnabled(false)
     mockWebServer.setProtocols(listOf(Protocol.HTTP_1_1))
