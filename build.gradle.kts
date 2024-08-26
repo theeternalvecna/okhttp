@@ -85,11 +85,13 @@ subprojects {
   if (project.name == "regression-test") return@subprojects
   if (project.name == "android-test-app") return@subprojects
   if (project.name == "container-tests") return@subprojects
+  if (project.name == "native-image-tests") return@subprojects
+  if (project.name == "okhttp-hpacktests") return@subprojects
 
   apply(plugin = "checkstyle")
   apply(plugin = "ru.vyarus.animalsniffer")
   apply(plugin = "biz.aQute.bnd.builder")
-  apply(plugin = "io.github.usefulness.maven-sympathy")
+//  apply(plugin = "io.github.usefulness.maven-sympathy")
 
   tasks.withType<JavaCompile> {
     options.encoding = Charsets.UTF_8.toString()
